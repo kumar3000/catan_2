@@ -193,6 +193,24 @@ body::before {
 .card-phase .steal-btns { display: flex; flex-wrap: wrap; gap: 0.25rem; }
 .card-phase .res-btn { padding: 0.2rem 0.4rem; font-size: 0.7rem; }
 
+.trade-bank {
+  font-size: 0.75rem;
+  color: var(--muted);
+  padding: 0.35rem 0;
+  border-top: 1px solid rgba(34, 211, 238, 0.1);
+}
+.trade-bank-title { font-weight: 600; color: var(--cyan); margin-bottom: 0.25rem; }
+.trade-bank-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+.trade-bank-row label { margin: 0; }
+.trade-bank-row select {
+  background: var(--surface);
+  border: 1px solid var(--cyan-dim);
+  color: var(--text);
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+}
+
 .dev-cards-inner {
   font-size: 0.7rem;
   color: var(--muted);
@@ -421,6 +439,12 @@ body::before {
 .players-list li.active {
   color: var(--cyan);
   font-weight: 600;
+}
+
+.vp-badge {
+  font-size: 0.7rem;
+  color: var(--amber);
+  font-weight: 400;
 }
 
 .log {

@@ -26,7 +26,7 @@
       <div class="header-actions">
         <button type="button" class="btn btn-primary" id="rollDice" disabled>Roll</button>
         <span class="dice" id="diceDisplay"><span id="die1">–</span><span id="die2">–</span></span>
-        <button type="button" class="btn btn-primary" id="endTurn" style="display:none">End</button>
+        <button type="button" class="btn btn-primary" id="endTurn" style="display:none">End turn</button>
         <label class="dev-toggle"><input type="checkbox" id="devModeCheckbox" /><span>Dev</span></label>
       </div>
     </header>
@@ -40,6 +40,42 @@
           <button type="button" class="btn btn-sm" id="buildSettlement" disabled>Post</button>
           <button type="button" class="btn btn-sm" id="buildCity" disabled>City</button>
           <button type="button" class="btn btn-sm" id="buyDevCard" disabled>Card</button>
+        </div>
+        <div class="trade-bank" id="tradeBankContainer">
+          <div class="trade-bank-title">Bank trade (4:1)</div>
+          <div class="trade-bank-row" id="trade4to1Row">
+            <label>Give 4</label>
+            <select id="tradeGiveRes">
+              <option value="wood">Timber</option>
+              <option value="brick">Alloy</option>
+              <option value="sheep">Provisions</option>
+              <option value="wheat">Rations</option>
+              <option value="ore">Ore</option>
+            </select>
+            <label>Get 1</label>
+            <select id="tradeGetRes">
+              <option value="wood">Timber</option>
+              <option value="brick">Alloy</option>
+              <option value="sheep">Provisions</option>
+              <option value="wheat">Rations</option>
+              <option value="ore">Ore</option>
+            </select>
+            <button type="button" class="btn btn-sm" id="confirmBankTrade">Trade</button>
+          </div>
+          <div class="trade-bank-row trade-3to1" id="trade3to1Row">
+            <span class="trade-bank-title">Port (3:1)</span>
+            <label>Give 3</label>
+            <select id="trade3GiveRes"></select>
+            <label>Get 1</label>
+            <select id="trade3GetRes">
+              <option value="wood">Timber</option>
+              <option value="brick">Alloy</option>
+              <option value="sheep">Provisions</option>
+              <option value="wheat">Rations</option>
+              <option value="ore">Ore</option>
+            </select>
+            <button type="button" class="btn btn-sm" id="confirmPortTrade">Trade</button>
+          </div>
         </div>
         <div id="devCardsContainer" class="dev-cards-inner"></div>
         <section class="dev-actions" id="devModeActions" style="display:none">

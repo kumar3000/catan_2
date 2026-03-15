@@ -68,8 +68,8 @@ function updateStatus() {
     const rollText = state.diceRoll
       ? state.diceRoll.isSeven
         ? '7 — discard then move smuggler'
-        : `Rolled ${state.diceRoll.d1 + state.diceRoll.d2}`
-      : 'Roll to begin.';
+        : `Rolled ${state.diceRoll.d1 + state.diceRoll.d2} — build or end turn`
+      : 'Roll the dice to collect resources.';
     gameStatus.textContent = `${playerName(state.currentPlayerIndex)}'s turn. ${rollText}`;
   }
 }
@@ -144,15 +144,60 @@ function updateBuildButtons() {
   el('buyDevCard').disabled = !canBuyDev;
 }
 
+function updateTradeBank() {
+  const container = el('tradeBankContainer');
+  if (!container) return;
+  const blocked = state.sevenPhase !== null || state.mustMoveRobber || (state.pendingStealTargets && state.pendingStealTargets.length > 0);
+  const canTrade =
+    state.phase === 'play' &&
+    state.diceRoll !== null &&
+    game.getWinner() === null &&
+    !blocked;
+  container.style.display = canTrade ? 'block' : 'none';
+  const cp = game.currentPlayer();
+  const giveSel = el('tradeGiveRes');
+  const getSel = el('tradeGetRes');
+  const btn = el('confirmBankTrade');
+  if (giveSel && getSel && btn) {
+    const giveOptions = RESOURCES.filter((r) => (cp.resources[r] || 0) >= 4);
+    giveSel.innerHTML = giveOptions.length
+      ? giveOptions.map((r) => `<option value="${r}">${r}</option>`).join('')
+      : '<option value="">—</option>';
+    if (giveOptions.length && !giveOptions.includes(giveSel.value)) giveSel.value = giveOptions[0];
+    const canDoTrade = giveOptions.length > 0 && giveSel.value && game.canBankTrade4to1(state.currentPlayerIndex, giveSel.value, getSel.value);
+    btn.disabled = !canTrade || !canDoTrade;
+  }
+  const row3 = el('trade3to1Row');
+  const give3Sel = el('trade3GiveRes');
+  const get3Sel = el('trade3GetRes');
+  const btn3 = el('confirmPortTrade');
+  const hasPort = game.hasPortAccess && game.hasPortAccess(state.currentPlayerIndex);
+  if (row3) row3.style.display = canTrade && hasPort ? 'flex' : 'none';
+  if (give3Sel && get3Sel && btn3) {
+    const give3Options = RESOURCES.filter((r) => (cp.resources[r] || 0) >= 3);
+    give3Sel.innerHTML = give3Options.length
+      ? give3Options.map((r) => `<option value="${r}">${r}</option>`).join('')
+      : '<option value="">—</option>';
+    if (give3Options.length && !give3Options.includes(give3Sel.value)) give3Sel.value = give3Options[0];
+    const canDo3 = give3Options.length > 0 && give3Sel.value && game.canBankTrade3to1(state.currentPlayerIndex, give3Sel.value, get3Sel.value);
+    btn3.disabled = !canTrade || !hasPort || !canDo3;
+  }
+}
+
 function updatePlayersList() {
   const ul = el('players');
   ul.innerHTML = state.players
     .map(
-      (p) =>
-        `<li class="${p.id === state.currentPlayerIndex ? 'active' : ''}">
+      (p) => {
+        const badges = [];
+        if (state.longestRoadPlayerId === p.id) badges.push('Longest Road');
+        if (state.largestArmyPlayerId === p.id) badges.push('Largest Army');
+        const badgeStr = badges.length ? ` <span class="vp-badge">(${badges.join(', ')})</span>` : '';
+        return `<li class="${p.id === state.currentPlayerIndex ? 'active' : ''}">
           <span class="player-dot" style="background:${PLAYER_COLORS[p.id % PLAYER_COLORS.length]}"></span>
-          ${playerName(p.id)}: ${game.getTotalVictoryPoints(p)} VP
-        </li>`
+          ${playerName(p.id)}: ${game.getTotalVictoryPoints(p)} VP${badgeStr}
+        </li>`;
+      }
     )
     .join('');
 }
@@ -287,6 +332,7 @@ function refresh() {
   updateResources();
   updateDice();
   updateBuildButtons();
+  updateTradeBank();
   updatePlayersList();
   updateCardPhaseContainer();
   updateDevCardsContainer();
@@ -331,9 +377,17 @@ function updateDevModeUI() {
 rollDiceBtn.addEventListener('click', () => {
   if (state.phase !== 'play' || state.diceRoll !== null) return;
   const roll = game.rollDice();
+  if (!roll) return;
   log(
     `${playerName(state.currentPlayerIndex)} rolled ${roll.d1 + roll.d2}${roll.isSeven ? ' (7 — discard then move smuggler!)' : ''}`
   );
+  if (!roll.isSeven && state.lastProduction) {
+    state.players.forEach((p, i) => {
+      const received = state.lastProduction[i];
+      const parts = RESOURCES.filter((r) => (received[r] || 0) > 0).map((r) => `${received[r]} ${r}`);
+      if (parts.length) log(`  → ${playerName(i)} received: ${parts.join(', ')}`);
+    });
+  }
   refresh();
 });
 
@@ -344,6 +398,31 @@ el('buyDevCard')?.addEventListener('click', () => {
     refresh();
   }
 });
+
+el('confirmBankTrade')?.addEventListener('click', () => {
+  const give = el('tradeGiveRes')?.value;
+  const get = el('tradeGetRes')?.value;
+  if (!give || !get || !game.canBankTrade4to1(state.currentPlayerIndex, give, get)) return;
+  if (game.bankTrade4to1(state.currentPlayerIndex, give, get)) {
+    log(`${playerName(state.currentPlayerIndex)} traded 4 ${give} for 1 ${get}`);
+    refresh();
+  }
+});
+
+el('confirmPortTrade')?.addEventListener('click', () => {
+  const give = el('trade3GiveRes')?.value;
+  const get = el('trade3GetRes')?.value;
+  if (!give || !get || !game.canBankTrade3to1(state.currentPlayerIndex, give, get)) return;
+  if (game.bankTrade3to1(state.currentPlayerIndex, give, get)) {
+    log(`${playerName(state.currentPlayerIndex)} port traded 3 ${give} for 1 ${get}`);
+    refresh();
+  }
+});
+
+el('tradeGiveRes')?.addEventListener('change', () => updateTradeBank());
+el('tradeGetRes')?.addEventListener('change', () => updateTradeBank());
+el('trade3GiveRes')?.addEventListener('change', () => updateTradeBank());
+el('trade3GetRes')?.addEventListener('change', () => updateTradeBank());
 
 boardEl.addEventListener('click', (e) => {
   const hexIdx = e.target.closest('[data-hex]')?.getAttribute('data-hex');

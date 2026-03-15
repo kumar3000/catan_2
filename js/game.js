@@ -50,13 +50,15 @@ function createGame(numPlayers = 2) {
     cities: [],
     roads: [],
     victoryPoints: 0,
-    devCards: [] // each: { type: 'knight'|'victory_point'|'road_building'|'year_of_plenty'|'monopoly', boughtThisTurn: boolean }
+    knightsPlayedCount: 0,
+    devCards: []
   }));
 
   let currentPlayerIndex = 0;
   let phase = 'setup'; // 'setup' | 'setup_road' | 'setup2' | 'play'
   let setupRound = 1;
   let setupSettlementCount = 0;
+  let setupRound2RoadsPlaced = 0; // roads placed in round 2 (each player places one)
   let diceRoll = null;
   let robberHex = hexData.find((h) => h.resource === 'desert').index;
   let devDeck = createShuffledDevDeck();
@@ -69,6 +71,15 @@ function createGame(numPlayers = 2) {
   let freeRoadsLeft = 0; // Road Building card
   let yearOfPlentyLeft = 0; // Year of Plenty card
   let monopolyResource = null; // set when playing Monopoly, then apply
+  let lastProduction = null; // { playerId: { wood: n, ... } } after a roll (not 7); cleared in nextTurn
+  let setupRoadPlacedThisStep = false;
+  let longestRoadPlayerId = -1;
+  let largestArmyPlayerId = -1;
+  let devCardPlayedThisTurn = false;
+
+  const portVertexKeys = new Set(
+    vertices.filter((v) => (vertexToHexes.get(v.key) || []).length <= 2).map((v) => v.key)
+  );
 
   const state = {
     hexData,
@@ -76,11 +87,13 @@ function createGame(numPlayers = 2) {
     edges,
     vertexToHexes,
     edgeVertices,
+    portVertexKeys,
     players,
     currentPlayerIndex,
     phase,
     setupRound,
     setupSettlementCount,
+    setupRound2RoadsPlaced,
     diceRoll,
     robberHex,
     devDeck,
@@ -92,6 +105,11 @@ function createGame(numPlayers = 2) {
     freeRoadsLeft,
     yearOfPlentyLeft,
     monopolyResource,
+    lastProduction,
+    setupRoadPlacedThisStep,
+    longestRoadPlayerId,
+    largestArmyPlayerId,
+    devCardPlayedThisTurn,
     selectedVertex: null,
     selectedEdge: null
   };
@@ -201,6 +219,7 @@ function createGame(numPlayers = 2) {
 
   function validRoadEdges(playerId) {
     if (state.phase === 'setup_road') {
+      if (state.setupRoadPlacedThisStep) return []; // only one road per settlement in setup
       const fromVertex = state.selectedVertex;
       if (!fromVertex) return [];
       return state.edges
@@ -217,6 +236,10 @@ function createGame(numPlayers = 2) {
   function giveResource(playerId, resource, amount = 1) {
     state.players[playerId].resources[resource] =
       (state.players[playerId].resources[resource] || 0) + amount;
+    if (state.lastProduction && state.players[playerId]) {
+      const p = state.lastProduction[playerId];
+      if (p) p[resource] = (p[resource] || 0) + amount;
+    }
   }
 
   function payResource(playerId, resource, amount = 1) {
@@ -251,9 +274,11 @@ function createGame(numPlayers = 2) {
   }
 
   function rollDice() {
+    if (state.phase !== 'play' || state.diceRoll !== null) return null;
     const d1 = 1 + Math.floor(Math.random() * 6);
     const d2 = 1 + Math.floor(Math.random() * 6);
     state.diceRoll = { d1, d2 };
+    state.lastProduction = null;
     if (d1 + d2 === 7) {
       state.diceRoll.isSeven = true;
       const mustDiscard = getPlayersWhoMustDiscard();
@@ -266,6 +291,8 @@ function createGame(numPlayers = 2) {
       state.mustMoveRobber = false;
       state.pendingStealTargets = null;
     } else {
+      state.lastProduction = {};
+      state.players.forEach((_, i) => { state.lastProduction[i] = {}; });
       for (let i = 0; i < state.hexData.length; i++) produceFromHex(i);
     }
     return state.diceRoll;
@@ -284,10 +311,74 @@ function createGame(numPlayers = 2) {
     return RESOURCES.reduce((n, res) => n + (r[res] || 0), 0);
   }
 
+  function computeLongestRoadLength(playerId) {
+    const roadSet = new Set(state.players[playerId].roads);
+    if (roadSet.size === 0) return 0;
+    const adj = new Map();
+    state.edges.forEach((e) => {
+      if (!roadSet.has(e.key)) return;
+      const v1 = e.v1, v2 = e.v2;
+      if (!adj.has(v1)) adj.set(v1, []);
+      adj.get(v1).push(v2);
+      if (!adj.has(v2)) adj.set(v2, []);
+      adj.get(v2).push(v1);
+    });
+    let best = 0;
+    const visitedEdges = new Set();
+    function dfs(v, len) {
+      best = Math.max(best, len);
+      for (const u of adj.get(v) || []) {
+        const edgeKey = [v, u].sort().join('|');
+        const e = state.edges.find((x) => (x.v1 === v && x.v2 === u) || (x.v1 === u && x.v2 === v));
+        if (!e || visitedEdges.has(e.key)) continue;
+        visitedEdges.add(e.key);
+        dfs(u, len + 1);
+        visitedEdges.delete(e.key);
+      }
+    }
+    for (const v of adj.keys()) dfs(v, 0);
+    return best;
+  }
+
+  function updateLongestRoad() {
+    let maxLen = 0;
+    for (let i = 0; i < state.players.length; i++) {
+      const len = computeLongestRoadLength(i);
+      if (len >= 5 && len > maxLen) maxLen = len;
+    }
+    if (maxLen < 5) {
+      state.longestRoadPlayerId = -1;
+      return;
+    }
+    const currentHolder = state.longestRoadPlayerId;
+    const candidates = state.players.map((_, i) => i).filter((i) => computeLongestRoadLength(i) === maxLen);
+    if (currentHolder >= 0 && candidates.includes(currentHolder)) return;
+    state.longestRoadPlayerId = candidates[0];
+  }
+
+  function updateLargestArmy() {
+    const currentHolder = state.largestArmyPlayerId;
+    const currentCount = currentHolder >= 0 ? state.players[currentHolder].knightsPlayedCount : 0;
+    let bestPlayerId = -1;
+    let bestCount = 0;
+    for (let i = 0; i < state.players.length; i++) {
+      const c = state.players[i].knightsPlayedCount || 0;
+      if (c >= 3 && c > bestCount) {
+        bestCount = c;
+        bestPlayerId = i;
+      }
+    }
+    if (bestPlayerId !== -1 && bestCount > currentCount) state.largestArmyPlayerId = bestPlayerId;
+    else if (bestCount < 3) state.largestArmyPlayerId = -1;
+  }
+
   function getTotalVictoryPoints(player) {
     const buildingVP = player.victoryPoints;
     const devVP = (player.devCards || []).filter((c) => c.type === 'victory_point').length;
-    return buildingVP + devVP;
+    let total = buildingVP + devVP;
+    if (state.longestRoadPlayerId === player.id) total += 2;
+    if (state.largestArmyPlayerId === player.id) total += 2;
+    return total;
   }
 
   function getPlayersOnHex(hexIndex) {
@@ -369,9 +460,45 @@ function createGame(numPlayers = 2) {
     return true;
   }
 
+  function hasPortAccess(playerId) {
+    const p = state.players[playerId];
+    return [...(p.settlements || []), ...(p.cities || [])].some((vk) => state.portVertexKeys.has(vk));
+  }
+
+  function canBankTrade4to1(playerId, giveRes, takeRes) {
+    if (state.phase !== 'play' || state.diceRoll === null) return false;
+    if (state.sevenPhase !== null || state.mustMoveRobber || state.pendingStealTargets) return false;
+    if (!RESOURCES.includes(giveRes) || !RESOURCES.includes(takeRes)) return false;
+    const r = state.players[playerId].resources;
+    return (r[giveRes] || 0) >= 4;
+  }
+
+  function bankTrade4to1(playerId, giveRes, takeRes) {
+    if (!canBankTrade4to1(playerId, giveRes, takeRes)) return false;
+    for (let i = 0; i < 4; i++) payResource(playerId, giveRes, 1);
+    giveResource(playerId, takeRes, 1);
+    return true;
+  }
+
+  function canBankTrade3to1(playerId, giveRes, takeRes) {
+    if (!hasPortAccess(playerId)) return false;
+    if (state.phase !== 'play' || state.diceRoll === null) return false;
+    if (state.sevenPhase !== null || state.mustMoveRobber || state.pendingStealTargets) return false;
+    if (!RESOURCES.includes(giveRes) || !RESOURCES.includes(takeRes)) return false;
+    const r = state.players[playerId].resources;
+    return (r[giveRes] || 0) >= 3;
+  }
+
+  function bankTrade3to1(playerId, giveRes, takeRes) {
+    if (!canBankTrade3to1(playerId, giveRes, takeRes)) return false;
+    for (let i = 0; i < 3; i++) payResource(playerId, giveRes, 1);
+    giveResource(playerId, takeRes, 1);
+    return true;
+  }
+
   function buyDevCard() {
     const pid = state.currentPlayerIndex;
-    if (state.phase !== 'play' || state.devDeck.length === 0) return null;
+    if (state.phase !== 'play' || state.diceRoll === null || state.devDeck.length === 0) return null;
     if (!canAfford(state.players[pid].resources, COST_DEV)) return null;
     if (state.sevenPhase !== null || state.mustMoveRobber || state.pendingStealTargets) return null;
     RESOURCES.forEach((r) => {
@@ -387,6 +514,7 @@ function createGame(numPlayers = 2) {
   function canPlayDevCard(card) {
     if (!card || card.type === 'victory_point') return false;
     if (card.boughtThisTurn) return false;
+    if (state.devCardPlayedThisTurn) return false;
     const pid = state.currentPlayerIndex;
     if (state.phase !== 'play') return false;
     if (state.pendingStealTargets) return false;
@@ -404,8 +532,11 @@ function createGame(numPlayers = 2) {
     const card = hand[cardIndex];
     if (!canPlayDevCard(card)) return { ok: false };
     if (card.type === 'victory_point') return { ok: false };
+    state.devCardPlayedThisTurn = true;
     hand.splice(cardIndex, 1);
     if (card.type === 'knight') {
+      state.players[pid].knightsPlayedCount = (state.players[pid].knightsPlayedCount || 0) + 1;
+      updateLargestArmy();
       state.mustMoveRobber = true;
       return { ok: true, effect: 'knight' };
     }
@@ -447,28 +578,22 @@ function createGame(numPlayers = 2) {
   }
 
   function placeSettlement(vertexKey, playerId) {
-    const valid = validSettlementVertices(playerId ?? state.currentPlayerIndex);
-    if (!valid.includes(vertexKey)) return false;
     const pid = playerId ?? state.currentPlayerIndex;
+    if (state.phase === 'play' && state.diceRoll === null) return false;
+    const valid = validSettlementVertices(pid);
+    if (!valid.includes(vertexKey)) return false;
     state.players[pid].settlements.push(vertexKey);
     state.players[pid].victoryPoints += 1;
 
     if (state.phase === 'setup' || state.phase === 'setup2') {
       state.selectedVertex = vertexKey;
+      state.setupRoadPlacedThisStep = false; // allow one road from this settlement
       if (state.phase === 'setup') {
         state.phase = 'setup_road';
       } else {
         giveStartingResources(vertexKey, pid);
-        state.setupSettlementCount++;
-        if (state.setupSettlementCount >= state.players.length) {
-          state.phase = 'play';
-          state.setupSettlementCount = 0;
-          state.selectedVertex = null;
-          // Current player (who placed last) goes first
-        } else {
-          state.phase = 'setup_road';
-          // selectedVertex stays set so same player places road
-        }
+        state.phase = 'setup_road';
+        // selectedVertex stays set so same player places road; play starts only after both place road in round 2
       }
     } else {
       if (!canAfford(state.players[pid].resources, COST_SETTLEMENT)) return false;
@@ -483,10 +608,12 @@ function createGame(numPlayers = 2) {
 
   function placeRoad(edgeKey, playerId) {
     const pid = playerId ?? state.currentPlayerIndex;
+    if (state.phase === 'setup_road' && state.setupRoadPlacedThisStep) return false; // only one road per setup step
     const valid = validRoadEdges(pid);
     if (!valid.includes(edgeKey)) return false;
 
     const isFreeRoad = state.freeRoadsLeft > 0;
+    if (state.phase === 'play' && !isFreeRoad && state.diceRoll === null) return false;
     if (state.phase === 'play' && !isFreeRoad && !canAfford(state.players[pid].resources, COST_ROAD)) return false;
     if (state.phase === 'play' && !isFreeRoad) {
       RESOURCES.forEach((r) => {
@@ -497,23 +624,35 @@ function createGame(numPlayers = 2) {
 
     state.players[pid].roads.push(edgeKey);
     if (isFreeRoad) state.freeRoadsLeft--;
+    if (state.phase === 'play' || state.phase === 'setup_road') updateLongestRoad();
 
     if (state.phase === 'setup_road') {
+      state.setupRoadPlacedThisStep = true;
       state.selectedVertex = null;
-      state.setupSettlementCount++;
-      if (state.setupSettlementCount >= state.players.length) {
-        if (state.setupRound === 1) {
+      if (state.setupRound === 1) {
+        state.setupSettlementCount++;
+        if (state.setupSettlementCount >= state.players.length) {
           state.setupRound = 2;
           state.setupSettlementCount = 0;
+          state.setupRound2RoadsPlaced = 0;
           state.phase = 'setup2';
           state.currentPlayerIndex = state.players.length - 1;
         } else {
-          state.phase = 'play';
-          state.setupSettlementCount = 0;
+          nextTurn();
+          state.phase = 'setup';
+          state.setupRoadPlacedThisStep = false;
         }
       } else {
-        nextTurn();
-        state.phase = 'setup';
+        // Round 2: each player places one road; last to place goes first in play
+        state.setupRound2RoadsPlaced++;
+        if (state.setupRound2RoadsPlaced >= state.players.length) {
+          state.phase = 'play';
+          state.setupRoadPlacedThisStep = false;
+        } else {
+          nextTurn();
+          state.phase = 'setup2';
+          state.setupRoadPlacedThisStep = false;
+        }
       }
     }
     return true;
@@ -521,6 +660,7 @@ function createGame(numPlayers = 2) {
 
   function placeCity(vertexKey) {
     const pid = state.currentPlayerIndex;
+    if (state.diceRoll === null) return false;
     if (!state.players[pid].settlements.includes(vertexKey)) return false;
     if (!canAfford(state.players[pid].resources, COST_CITY)) return false;
     state.players[pid].settlements = state.players[pid].settlements.filter(
@@ -539,6 +679,8 @@ function createGame(numPlayers = 2) {
     const outgoing = state.currentPlayerIndex;
     (state.players[outgoing].devCards || []).forEach((c) => { c.boughtThisTurn = false; });
     state.diceRoll = null;
+    state.lastProduction = null;
+    state.devCardPlayedThisTurn = false;
     state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.players.length;
     state.selectedVertex = null;
     state.selectedEdge = null;
@@ -599,6 +741,11 @@ function createGame(numPlayers = 2) {
     getTotalVictoryPoints,
     getPlayersWhoMustDiscard,
     submitDiscard,
+    canBankTrade4to1,
+    bankTrade4to1,
+    canBankTrade3to1,
+    bankTrade3to1,
+    hasPortAccess,
     buyDevCard,
     canPlayDevCard,
     playDevCard,
