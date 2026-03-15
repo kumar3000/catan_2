@@ -1,13 +1,18 @@
-# CATAN
+# Galactic Settlers (Star Wars Catan)
 
-A web version of Settlers of Catan. Play locally in the browser with 2 players (hot-seat).
+A Star Wars–themed web version of Settlers of Catan. Play locally in the browser with 2 players (hot-seat).
 
 ## How to play
 
-1. **Setup**: Each player places one settlement, then one road (round 1). Then again in the same order (round 2). You receive starting resources from the hexes around your second settlement.
-2. **Play**: On your turn, roll the dice. If you roll 7, the robber is activated (move it in a future version). Otherwise, all players receive resources from hexes with that number that touch their settlements (1 per settlement, 2 per city).
-3. Build **roads** (1 wood + 1 brick), **settlements** (1 wood, brick, sheep, wheat), and **cities** (2 wheat + 3 ore) by clicking valid highlighted spots on the board. Upgrade a settlement to a city by clicking it when you have the resources.
-4. **End turn** when done. First to **10 victory points** wins (settlements = 1 VP, cities = 2 VP).
+1. **Setup**
+   - **Round 1:** Each faction (in order) places one **outpost**, then one **hyperlane** from that outpost.
+   - **Round 2 (reverse order):** The last faction goes first. Each places a second outpost (must touch one of their hyperlanes), then a second hyperlane. You receive starting resources from the hexes around your **second** outpost.
+2. **Play:** On your turn, **Roll** the dice. On a 7, the smuggler is activated (move coming in a future version). Otherwise, all factions receive resources from hexes with that number next to their outposts/cities (1 per outpost, 2 per city).
+3. **Build** by clicking **highlighted** spots on the board:
+   - **Hyperlane** — 1 timber + 1 alloy
+   - **Outpost** — 1 timber, 1 alloy, 1 provisions, 1 rations (must touch your hyperlane, not next to another building)
+   - **City** — upgrade an outpost: 2 rations + 3 ore
+4. Click **End turn** when done. First to **10 victory points** wins (outpost = 1 VP, city = 2 VP).
 
 ## Run locally
 
@@ -18,4 +23,4 @@ npm install
 npm run dev
 ```
 
-Then open **http://localhost:3000** in your browser. If you don’t have Node, you can use any static file server that serves the project directory (e.g. Python: `python -m http.server 8000`).
+Then open **http://localhost:3000** in your browser.

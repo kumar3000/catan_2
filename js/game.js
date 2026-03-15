@@ -17,8 +17,23 @@ const COST_SETTLEMENT = { wood: 1, brick: 1, sheep: 1, wheat: 1 };
 const COST_CITY = { wheat: 2, ore: 3 };
 const COST_DEV = { sheep: 1, wheat: 1, ore: 1 };
 
+// Development card deck (standard Catan): 14 Knight, 5 VP, 2 Road Building, 2 Year of Plenty, 2 Monopoly
+const DEV_CARD_COUNTS = { knight: 14, victory_point: 5, road_building: 2, year_of_plenty: 2, monopoly: 2 };
+
 function canAfford(resources, cost) {
   return Object.keys(cost).every((r) => (resources[r] || 0) >= cost[r]);
+}
+
+function createShuffledDevDeck() {
+  const deck = [];
+  for (const [type, count] of Object.entries(DEV_CARD_COUNTS)) {
+    for (let i = 0; i < count; i++) deck.push(type);
+  }
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck;
 }
 
 function createGame(numPlayers = 2) {
@@ -35,15 +50,25 @@ function createGame(numPlayers = 2) {
     cities: [],
     roads: [],
     victoryPoints: 0,
-    devCards: []
+    devCards: [] // each: { type: 'knight'|'victory_point'|'road_building'|'year_of_plenty'|'monopoly', boughtThisTurn: boolean }
   }));
 
   let currentPlayerIndex = 0;
-  let phase = 'setup'; // 'setup' = place settlement then road (round 1); 'setup2' = same (round 2); 'play'
-  let setupRound = 1; // 1 or 2
-  let setupSettlementCount = 0; // total settlements placed in current round
+  let phase = 'setup'; // 'setup' | 'setup_road' | 'setup2' | 'play'
+  let setupRound = 1;
+  let setupSettlementCount = 0;
   let diceRoll = null;
   let robberHex = hexData.find((h) => h.resource === 'desert').index;
+  let devDeck = createShuffledDevDeck();
+  // Roll 7: 'discard' → players with >7 discard half; then 'move_robber' → current player moves robber and steals
+  let sevenPhase = null; // null | 'discard' | 'move_robber'
+  let discardQueue = []; // { playerId, count }[]; current = discardQueue[0]
+  let discardSelection = null; // { wood, brick, ... } count selected by current discarding player
+  let mustMoveRobber = false; // true after playing Knight or after 7 robber phase
+  let pendingStealTargets = null; // [playerId] after moving robber; null when done
+  let freeRoadsLeft = 0; // Road Building card
+  let yearOfPlentyLeft = 0; // Year of Plenty card
+  let monopolyResource = null; // set when playing Monopoly, then apply
 
   const state = {
     hexData,
@@ -58,6 +83,15 @@ function createGame(numPlayers = 2) {
     setupSettlementCount,
     diceRoll,
     robberHex,
+    devDeck,
+    sevenPhase,
+    discardQueue,
+    discardSelection,
+    mustMoveRobber,
+    pendingStealTargets,
+    freeRoadsLeft,
+    yearOfPlentyLeft,
+    monopolyResource,
     selectedVertex: null,
     selectedEdge: null
   };
@@ -221,8 +255,16 @@ function createGame(numPlayers = 2) {
     const d2 = 1 + Math.floor(Math.random() * 6);
     state.diceRoll = { d1, d2 };
     if (d1 + d2 === 7) {
-      // Robber: move later; for now just skip production
       state.diceRoll.isSeven = true;
+      const mustDiscard = getPlayersWhoMustDiscard();
+      if (mustDiscard.length > 0) {
+        state.sevenPhase = 'discard';
+        state.discardQueue = mustDiscard.slice();
+      } else {
+        state.sevenPhase = 'move_robber';
+      }
+      state.mustMoveRobber = false;
+      state.pendingStealTargets = null;
     } else {
       for (let i = 0; i < state.hexData.length; i++) produceFromHex(i);
     }
@@ -235,6 +277,173 @@ function createGame(numPlayers = 2) {
       const hex = state.hexData[h];
       if (hex.resource !== 'desert') giveResource(playerId, hex.resource, 1);
     }
+  }
+
+  function totalResourceCount(playerId) {
+    const r = state.players[playerId].resources;
+    return RESOURCES.reduce((n, res) => n + (r[res] || 0), 0);
+  }
+
+  function getTotalVictoryPoints(player) {
+    const buildingVP = player.victoryPoints;
+    const devVP = (player.devCards || []).filter((c) => c.type === 'victory_point').length;
+    return buildingVP + devVP;
+  }
+
+  function getPlayersOnHex(hexIndex) {
+    const hex = state.hexData[hexIndex];
+    if (!hex) return [];
+    const vertexKeys = state.vertices
+      .filter((v) => (state.vertexToHexes.get(v.key) || []).includes(hexIndex))
+      .map((v) => v.key);
+    const playerIds = new Set();
+    for (const vk of vertexKeys) {
+      for (let i = 0; i < state.players.length; i++) {
+        if (state.players[i].settlements.includes(vk) || state.players[i].cities.includes(vk)) {
+          playerIds.add(i);
+        }
+      }
+    }
+    return Array.from(playerIds);
+  }
+
+  function moveRobber(hexIndex) {
+    if (hexIndex === state.robberHex) return { ok: false };
+    state.robberHex = hexIndex;
+    const targets = getPlayersOnHex(hexIndex);
+    state.mustMoveRobber = false;
+    if (state.sevenPhase === 'move_robber') state.sevenPhase = null;
+    if (targets.length === 0) return { ok: true, stealTargets: [] };
+    if (targets.length === 1) {
+      stealFromPlayer(targets[0]);
+      return { ok: true, stealTargets: [], stoleFrom: targets[0] };
+    }
+    state.pendingStealTargets = targets;
+    return { ok: true, stealTargets: targets };
+  }
+
+  function stealFromPlayer(fromPlayerId) {
+    const from = state.players[fromPlayerId].resources;
+    const has = RESOURCES.filter((r) => (from[r] || 0) > 0);
+    if (has.length === 0) return null;
+    const chosen = has[Math.floor(Math.random() * has.length)];
+    payResource(fromPlayerId, chosen, 1);
+    giveResource(state.currentPlayerIndex, chosen, 1);
+    state.pendingStealTargets = null;
+    return chosen;
+  }
+
+  function stealFromPlayerChosen(fromPlayerId) {
+    const from = state.players[fromPlayerId].resources;
+    const has = RESOURCES.filter((r) => (from[r] || 0) > 0);
+    if (has.length === 0) return null;
+    const chosen = has[Math.floor(Math.random() * has.length)];
+    payResource(fromPlayerId, chosen, 1);
+    giveResource(state.currentPlayerIndex, chosen, 1);
+    state.pendingStealTargets = null;
+    return chosen;
+  }
+
+  function getPlayersWhoMustDiscard() {
+    return state.players
+      .map((p, i) => ({ playerId: i, count: totalResourceCount(i) }))
+      .filter(({ count }) => count > 7)
+      .map(({ playerId, count }) => ({ playerId, count: Math.floor(count / 2) }));
+  }
+
+  function submitDiscard(playerId, discarded) {
+    const total = RESOURCES.reduce((s, r) => s + (discarded[r] || 0), 0);
+    const needed = state.discardQueue[0]?.count ?? 0;
+    if (state.sevenPhase !== 'discard' || state.discardQueue.length === 0 || state.discardQueue[0].playerId !== playerId) return false;
+    if (total !== needed) return false;
+    const res = state.players[playerId].resources;
+    for (const r of RESOURCES) {
+      const n = discarded[r] || 0;
+      if (n > (res[r] || 0)) return false;
+      for (let i = 0; i < n; i++) payResource(playerId, r);
+    }
+    state.discardQueue.shift();
+    if (state.discardQueue.length === 0) {
+      state.sevenPhase = 'move_robber';
+    }
+    return true;
+  }
+
+  function buyDevCard() {
+    const pid = state.currentPlayerIndex;
+    if (state.phase !== 'play' || state.devDeck.length === 0) return null;
+    if (!canAfford(state.players[pid].resources, COST_DEV)) return null;
+    if (state.sevenPhase !== null || state.mustMoveRobber || state.pendingStealTargets) return null;
+    RESOURCES.forEach((r) => {
+      const n = COST_DEV[r] || 0;
+      for (let i = 0; i < n; i++) payResource(pid, r);
+    });
+    const type = state.devDeck.pop();
+    const card = { type, boughtThisTurn: true };
+    state.players[pid].devCards.push(card);
+    return card;
+  }
+
+  function canPlayDevCard(card) {
+    if (!card || card.type === 'victory_point') return false;
+    if (card.boughtThisTurn) return false;
+    const pid = state.currentPlayerIndex;
+    if (state.phase !== 'play') return false;
+    if (state.pendingStealTargets) return false;
+    if (card.type === 'knight') return true;
+    if (card.type === 'road_building') return state.freeRoadsLeft === 0 && validRoadEdges(pid).length >= 2;
+    if (card.type === 'year_of_plenty') return state.yearOfPlentyLeft === 0;
+    if (card.type === 'monopoly') return state.monopolyResource === null;
+    return false;
+  }
+
+  function playDevCard(cardIndex) {
+    const pid = state.currentPlayerIndex;
+    const hand = state.players[pid].devCards;
+    if (cardIndex < 0 || cardIndex >= hand.length) return { ok: false };
+    const card = hand[cardIndex];
+    if (!canPlayDevCard(card)) return { ok: false };
+    if (card.type === 'victory_point') return { ok: false };
+    hand.splice(cardIndex, 1);
+    if (card.type === 'knight') {
+      state.mustMoveRobber = true;
+      return { ok: true, effect: 'knight' };
+    }
+    if (card.type === 'road_building') {
+      state.freeRoadsLeft = 2;
+      return { ok: true, effect: 'road_building' };
+    }
+    if (card.type === 'year_of_plenty') {
+      state.yearOfPlentyLeft = 2;
+      return { ok: true, effect: 'year_of_plenty' };
+    }
+    if (card.type === 'monopoly') {
+      state.monopolyResource = 'pending';
+      return { ok: true, effect: 'monopoly' };
+    }
+    return { ok: false };
+  }
+
+  function applyMonopoly(resource) {
+    if (state.monopolyResource !== 'pending') return 0;
+    const pid = state.currentPlayerIndex;
+    let total = 0;
+    for (let i = 0; i < state.players.length; i++) {
+      if (i === pid) continue;
+      const n = state.players[i].resources[resource] || 0;
+      total += n;
+      state.players[i].resources[resource] = 0;
+    }
+    state.players[pid].resources[resource] = (state.players[pid].resources[resource] || 0) + total;
+    state.monopolyResource = null;
+    return total;
+  }
+
+  function takeYearOfPlentyResource(resource) {
+    if (state.yearOfPlentyLeft <= 0) return false;
+    giveResource(state.currentPlayerIndex, resource, 1);
+    state.yearOfPlentyLeft--;
+    return true;
   }
 
   function placeSettlement(vertexKey, playerId) {
@@ -251,20 +460,21 @@ function createGame(numPlayers = 2) {
       } else {
         giveStartingResources(vertexKey, pid);
         state.setupSettlementCount++;
-        state.selectedVertex = null;
-        if (state.setupSettlementCount >= state.players.length * 2) {
+        if (state.setupSettlementCount >= state.players.length) {
           state.phase = 'play';
           state.setupSettlementCount = 0;
-          state.currentPlayerIndex = state.players.length - 1;
+          state.selectedVertex = null;
+          // Current player (who placed last) goes first
+        } else {
+          state.phase = 'setup_road';
+          // selectedVertex stays set so same player places road
         }
-        nextTurn();
       }
     } else {
-      const pid2 = state.currentPlayerIndex;
-      if (!canAfford(state.players[pid2].resources, COST_SETTLEMENT)) return false;
+      if (!canAfford(state.players[pid].resources, COST_SETTLEMENT)) return false;
       RESOURCES.forEach((r) => {
         const n = COST_SETTLEMENT[r] || 0;
-        for (let i = 0; i < n; i++) payResource(pid2, r);
+        for (let i = 0; i < n; i++) payResource(pid, r);
       });
       state.selectedVertex = null;
     }
@@ -276,7 +486,17 @@ function createGame(numPlayers = 2) {
     const valid = validRoadEdges(pid);
     if (!valid.includes(edgeKey)) return false;
 
+    const isFreeRoad = state.freeRoadsLeft > 0;
+    if (state.phase === 'play' && !isFreeRoad && !canAfford(state.players[pid].resources, COST_ROAD)) return false;
+    if (state.phase === 'play' && !isFreeRoad) {
+      RESOURCES.forEach((r) => {
+        const n = COST_ROAD[r] || 0;
+        for (let i = 0; i < n; i++) payResource(pid, r);
+      });
+    }
+
     state.players[pid].roads.push(edgeKey);
+    if (isFreeRoad) state.freeRoadsLeft--;
 
     if (state.phase === 'setup_road') {
       state.selectedVertex = null;
@@ -286,19 +506,15 @@ function createGame(numPlayers = 2) {
           state.setupRound = 2;
           state.setupSettlementCount = 0;
           state.phase = 'setup2';
+          state.currentPlayerIndex = state.players.length - 1;
         } else {
           state.phase = 'play';
           state.setupSettlementCount = 0;
-          state.currentPlayerIndex = state.players.length - 1;
         }
+      } else {
+        nextTurn();
+        state.phase = 'setup';
       }
-      nextTurn();
-    } else if (state.phase === 'play') {
-      if (!canAfford(state.players[pid].resources, COST_ROAD)) return false;
-      RESOURCES.forEach((r) => {
-        const n = COST_ROAD[r] || 0;
-        for (let i = 0; i < n; i++) payResource(pid, r);
-      });
     }
     return true;
   }
@@ -320,18 +536,24 @@ function createGame(numPlayers = 2) {
   }
 
   function nextTurn() {
+    const outgoing = state.currentPlayerIndex;
+    (state.players[outgoing].devCards || []).forEach((c) => { c.boughtThisTurn = false; });
     state.diceRoll = null;
     state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.players.length;
     state.selectedVertex = null;
     state.selectedEdge = null;
+    state.sevenPhase = null;
+    state.discardQueue = [];
+    state.mustMoveRobber = false;
+    state.pendingStealTargets = null;
   }
 
   function canBuildRoad() {
-    if (state.phase !== 'play' || state.diceRoll === null) return false;
-    return (
-      canAfford(currentPlayer().resources, COST_ROAD) &&
-      validRoadEdges(state.currentPlayerIndex).length > 0
-    );
+    if (state.phase !== 'play') return false;
+    if (state.diceRoll === null && state.freeRoadsLeft === 0) return false;
+    const valid = validRoadEdges(state.currentPlayerIndex).length > 0;
+    const canPay = canAfford(currentPlayer().resources, COST_ROAD);
+    return valid && (state.freeRoadsLeft > 0 || canPay);
   }
 
   function canBuildSettlement() {
@@ -348,7 +570,11 @@ function createGame(numPlayers = 2) {
   }
 
   function getWinner() {
-    return state.players.find((p) => p.victoryPoints >= 10)?.id ?? null;
+    return state.players.find((p) => getTotalVictoryPoints(p) >= 10)?.id ?? null;
+  }
+
+  function setCurrentPlayerIndex(index) {
+    if (index >= 0 && index < state.players.length) state.currentPlayerIndex = index;
   }
 
   return {
@@ -356,6 +582,7 @@ function createGame(numPlayers = 2) {
     currentPlayer,
     validSettlementVertices,
     validRoadEdges,
+    setCurrentPlayerIndex,
     isVertexOccupied,
     isEdgeOccupied,
     getVertexByKey,
@@ -369,9 +596,21 @@ function createGame(numPlayers = 2) {
     canBuildSettlement,
     canBuildCity,
     canAfford,
+    getTotalVictoryPoints,
+    getPlayersWhoMustDiscard,
+    submitDiscard,
+    buyDevCard,
+    canPlayDevCard,
+    playDevCard,
+    applyMonopoly,
+    takeYearOfPlentyResource,
+    moveRobber,
+    stealFromPlayerChosen,
+    getPlayersOnHex,
     COST_ROAD,
     COST_SETTLEMENT,
     COST_CITY,
+    COST_DEV,
     getWinner,
     RESOURCES
   };

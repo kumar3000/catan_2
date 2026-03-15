@@ -1,17 +1,18 @@
 /**
- * Catan board layout: 19 hexes in 3-4-5-4-3 pattern.
- * Standard resource and number token layout (balanced).
+ * Catan board layout per official rules.
+ * - 19 terrain hexes in 3-4-5-4-3 pattern (flat-top, odd-r).
+ * - Resources: 4 Wood (lumber), 4 Wheat (grain), 4 Sheep (wool), 3 Brick (hills), 3 Ore (mountains), 1 Desert.
+ * - 18 number tokens: 2,3,3,4,4,5,5,6,6,8,8,9,9,10,10,11,11,12 (no 7). Desert has no token.
+ * - Rule: red numbers (6 and 8) must not be on adjacent hexes.
  */
 
 const HEX_RADIUS = 42;
 const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
 const HEX_WIDTH = 2 * HEX_RADIUS;
 
-// Row lengths: 3, 4, 5, 4, 3
 const ROW_LENGTHS = [3, 4, 5, 4, 3];
 
-// Standard layout: resource type per hex (row index, col index)
-// wood, brick, sheep, wheat, ore, desert
+// Resource per hex by position (row 0..4, left to right). Official mix.
 const RESOURCES = [
   'wood', 'wood', 'sheep',
   'brick', 'wheat', 'ore', 'sheep',
@@ -20,20 +21,35 @@ const RESOURCES = [
   'brick', 'sheep', 'wheat'
 ];
 
-// Number tokens (no 7; desert has no number). Order matches hex index.
+// Number tokens (0 = desert). Layout chosen so no 6 is adjacent to 8 (official rule).
 const NUMBERS = [
-  5, 2, 6,
-  3, 8, 10, 9,
-  0, 11, 4, 8, 10,
+  8, 2, 6,
+  3, 5, 10, 9,
+  0, 11, 4, 10, 8,
   9, 3, 4, 5,
   6, 11, 12
 ];
 
-// Flatten (row, col) to hex index
+// Row,col to hex index (0..18)
 function hexIndex(row, col) {
   let i = 0;
   for (let r = 0; r < row; r++) i += ROW_LENGTHS[r];
   return i + col;
+}
+
+// Adjacent hex indices (flat-top odd-r). Used to enforce "6 and 8 not adjacent".
+function getAdjacentHexIndices(row, col) {
+  const adj = [];
+  const isOddRow = row % 2 === 1;
+  const offsets = isOddRow
+    ? [[-1, -1], [-1, 0], [0, -1], [0, 1], [1, -1], [1, 0]]
+    : [[-1, 0], [-1, 1], [0, -1], [0, 1], [1, 0], [1, 1]];
+  for (const [dr, dc] of offsets) {
+    const r2 = row + dr;
+    const c2 = col + dc;
+    if (r2 >= 0 && r2 < 5 && c2 >= 0 && c2 < ROW_LENGTHS[r2]) adj.push(hexIndex(r2, c2));
+  }
+  return adj;
 }
 
 // Hex center in pixel coordinates (flat-top hex grid, odd-r offset)
@@ -179,6 +195,59 @@ function getEdgeVertices(edges) {
   return map;
 }
 
+const BOUNDARY_TOL = 2;
+
+// Returns ordered list of { x, y } forming the island outline (closed polygon).
+function getBoardBoundary(hexData, vertices, edges) {
+  const vByKey = new Map(vertices.map((v) => [v.key, v]));
+  const hexesTouchingEdge = new Map();
+  edges.forEach((e) => hexesTouchingEdge.set(e.key, 0));
+  hexData.forEach((hex) => {
+    const corners = hex.corners.map((c) => ({ x: c.x, y: c.y }));
+    edges.forEach((e) => {
+      const v1 = vByKey.get(e.v1);
+      const v2 = vByKey.get(e.v2);
+      if (!v1 || !v2) return;
+      const p1 = { x: v1.x, y: v1.y };
+      const p2 = { x: v2.x, y: v2.y };
+      const touches1 = corners.some((c) => Math.hypot(c.x - p1.x, c.y - p1.y) < BOUNDARY_TOL);
+      const touches2 = corners.some((c) => Math.hypot(c.x - p2.x, c.y - p2.y) < BOUNDARY_TOL);
+      if (touches1 && touches2) hexesTouchingEdge.set(e.key, (hexesTouchingEdge.get(e.key) || 0) + 1);
+    });
+  });
+  const boundaryEdgeKeys = new Set([...hexesTouchingEdge.entries()].filter(([, n]) => n === 1).map(([k]) => k));
+  const boundaryEdges = edges.filter((e) => boundaryEdgeKeys.has(e.key));
+  if (boundaryEdges.length === 0) return [];
+
+  const adj = new Map();
+  boundaryEdges.forEach((e) => {
+    if (!adj.has(e.v1)) adj.set(e.v1, []);
+    adj.get(e.v1).push(e.v2);
+    if (!adj.has(e.v2)) adj.set(e.v2, []);
+    adj.get(e.v2).push(e.v1);
+  });
+
+  const start = boundaryEdges[0].v1;
+  const path = [start];
+  let prev = null;
+  let cur = start;
+  const used = new Set();
+  do {
+    const nexts = adj.get(cur).filter((n) => n !== prev);
+    const next = nexts[0];
+    if (!next || used.has(next)) break;
+    used.add(next);
+    path.push(next);
+    prev = cur;
+    cur = next;
+  } while (cur !== start && path.length <= boundaryEdges.length + 2);
+
+  return path.map((k) => {
+    const v = vByKey.get(k);
+    return v ? { x: v.x, y: v.y } : null;
+  }).filter(Boolean);
+}
+
 export {
   HEX_RADIUS,
   HEX_HEIGHT,
@@ -187,5 +256,8 @@ export {
   getVerticesAndEdges,
   getVertexHexAdjacency,
   getEdgeVertices,
-  hexIndex
+  getBoardBoundary,
+  hexIndex,
+  getAdjacentHexIndices,
+  ROW_LENGTHS
 };
