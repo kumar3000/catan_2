@@ -1,0 +1,318 @@
+/* CATAN — board game aesthetic: warm, tactile, slightly vintage */
+
+:root {
+  --bg-deep: #1a1612;
+  --bg-panel: #252019;
+  --bg-board: #2d261f;
+  --accent-gold: #c9a227;
+  --accent-gold-dim: #8b7320;
+  --text-primary: #e8e0d5;
+  --text-muted: #9a8f82;
+  --wood: #5c4033;
+  --brick: #8b4513;
+  --sheep: #6b8e23;
+  --wheat: #daa520;
+  --ore: #708090;
+  --desert: #c4a574;
+  --radius: 8px;
+  --shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-family: 'Outfit', sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+#app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header */
+.game-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 1rem 1.5rem;
+  background: var(--bg-panel);
+  border-bottom: 2px solid var(--accent-gold-dim);
+  flex-wrap: wrap;
+}
+
+.game-header h1 {
+  margin: 0;
+  font-family: 'Crimson Pro', serif;
+  font-weight: 600;
+  font-size: 1.75rem;
+  letter-spacing: 0.15em;
+  color: var(--accent-gold);
+}
+
+.game-status {
+  flex: 1;
+  min-width: 180px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.dice-section {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.dice-btn {
+  padding: 0.5rem 1rem;
+  background: var(--accent-gold);
+  color: var(--bg-deep);
+  border: none;
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.dice-btn:hover:not(:disabled) {
+  background: #d4af37;
+  transform: scale(1.02);
+}
+
+.dice-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dice-display {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.die {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--text-primary);
+  color: var(--bg-deep);
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+/* Main layout */
+.game-main {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 1rem;
+  overflow: auto;
+}
+
+/* Panels */
+.panel {
+  width: 220px;
+  flex-shrink: 0;
+  padding: 1rem;
+  background: var(--bg-panel);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.panel h2 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.resource-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.resource-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.res-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.res-wood { background: var(--wood); }
+.res-brick { background: var(--brick); }
+.res-sheep { background: var(--sheep); }
+.res-wheat { background: var(--wheat); }
+.res-ore { background: var(--ore); }
+
+.build-actions,
+.dev-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.action-btn {
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-board);
+  color: var(--text-primary);
+  border: 1px solid var(--text-muted);
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.action-btn:hover:not(:disabled) {
+  border-color: var(--accent-gold);
+  background: rgba(201, 162, 39, 0.1);
+}
+
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Board */
+.board-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  min-width: 0;
+}
+
+.board {
+  max-width: 100%;
+  max-height: 100%;
+  filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.5));
+}
+
+/* Hex styles (filled by JS) */
+.hex-tile {
+  cursor: default;
+  transition: filter 0.15s;
+}
+
+.hex-tile:hover {
+  filter: brightness(1.1);
+}
+
+.hex-tile.robber {
+  filter: brightness(0.7) saturate(0.7);
+}
+
+.hex-number {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 700;
+  fill: #1a1612;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.hex-number.red {
+  fill: #8b0000;
+}
+
+/* Settlements & cities */
+.vertex-settlement {
+  fill: var(--text-primary);
+  stroke: var(--bg-deep);
+  stroke-width: 2;
+  cursor: pointer;
+}
+
+.vertex-settlement.highlight {
+  filter: brightness(1.2);
+  stroke: var(--accent-gold);
+}
+
+.vertex-city {
+  fill: var(--accent-gold);
+  stroke: var(--bg-deep);
+  stroke-width: 2;
+  cursor: pointer;
+}
+
+.vertex-city.highlight {
+  filter: brightness(1.2);
+}
+
+/* Roads */
+.road-segment {
+  fill: none;
+  stroke-width: 10;
+  stroke-linecap: round;
+  cursor: pointer;
+}
+
+.road-segment.highlight {
+  filter: brightness(1.2);
+}
+
+/* Players list */
+#players {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#players li {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+#players li.active {
+  color: var(--accent-gold);
+  font-weight: 600;
+}
+
+.player-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+/* Log */
+#logEntries {
+  max-height: 200px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+#logEntries p {
+  margin: 0.25rem 0;
+}

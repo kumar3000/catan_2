@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CATAN</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400;0,600;1,400&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/game.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="game-header">
+      <h1>CATAN</h1>
+      <div class="game-status" id="gameStatus">Place your initial settlements</div>
+      <div class="dice-section">
+        <button type="button" class="dice-btn" id="rollDice" disabled>Roll dice</button>
+        <div class="dice-display" id="diceDisplay">
+          <span class="die" id="die1">–</span>
+          <span class="die" id="die2">–</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="game-main">
+      <aside class="panel panel-left">
+        <section class="resources" id="playerResources">
+          <h2>Your resources</h2>
+          <ul class="resource-list">
+            <li><span class="res-icon res-wood"></span> <span id="resWood">0</span></li>
+            <li><span class="res-icon res-brick"></span> <span id="resBrick">0</span></li>
+            <li><span class="res-icon res-sheep"></span> <span id="resSheep">0</span></li>
+            <li><span class="res-icon res-wheat"></span> <span id="resWheat">0</span></li>
+            <li><span class="res-icon res-ore"></span> <span id="resOre">0</span></li>
+          </ul>
+        </section>
+        <section class="build-actions">
+          <h2>Build</h2>
+          <button type="button" class="action-btn" id="buildRoad" disabled>Road</button>
+          <button type="button" class="action-btn" id="buildSettlement" disabled>Settlement</button>
+          <button type="button" class="action-btn" id="buildCity" disabled>City</button>
+        </section>
+        <section class="dev-cards">
+          <h2>Dev cards</h2>
+          <button type="button" class="action-btn" id="buyDevCard" disabled>Buy (1 of each)</button>
+        </section>
+      </aside>
+
+      <div class="board-container">
+        <svg id="board" class="board" viewBox="0 0 800 700" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+
+      <aside class="panel panel-right">
+        <section class="players" id="playersList">
+          <h2>Players</h2>
+          <ul id="players"></ul>
+        </section>
+        <section class="log" id="gameLog">
+          <h2>Log</h2>
+          <div id="logEntries"></div>
+        </section>
+      </aside>
+    </main>
+  </div>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
